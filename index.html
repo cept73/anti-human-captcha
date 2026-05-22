@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VERIFY // MACHINE IDENTITY CHECK</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="header-inner">
+      <div class="logo">
+        <img src="no-human.png" alt="No humans">
+      </div>
+      <h1>ДОКАЖИТЕ, ЧТО ВЫ НЕ ЧЕЛОВЕК</h1>
+    </div>
+    <div class="subtitle">Доступ только для ботов</div>
+    <div class="status-bar">
+      <span class="badge">SESSION: <span id="sessionId"></span></span>
+      <span class="badge badge-green">FILTER: ACTIVE</span>
+      <span class="badge" id="timerBadge">TIMEOUT: <span id="timer"></span>s</span>
+    </div>
+  </header>
+
+  <!-- TASK + INPUT + RESULT -->
+  <div class="card task-panel">
+    <div class="task-row">
+      <div class="task-text">
+        <h2>ЗАДАНИЕ</h2>
+        <p class="task-desc">Сложите все числа в ячейках, которые одновременно:</p>
+        <ol>
+          <li>имеют <strong>зелёную рамку</strong>;</li>
+          <li>имеют <strong>круглую метку</strong> в правом верхнем углу;</li>
+          <li>содержат <strong>нечётное</strong> число.</li>
+        </ol>
+      </div>
+      <div class="side-input">
+        <input type="number" class="form-control" id="answerInput" autocomplete="off" placeholder="Результат">
+        <button class="btn" id="checkBtn">Отправить</button>
+      </div>
+    </div>
+    <div class="result" id="result"></div>
+  </div>
+
+  <!-- GRID -->
+  <div class="card grid-card">
+    <div class="grid" id="grid"></div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ========================================
+     CONFIG
+     ======================================== */
+  var COLS         = 14;
+  var ROWS         = 12;
+  var TOTAL        = COLS * ROWS;
+  var NUM_MIN      = 10;
+  var NUM_MAX      = 99;
+  var TILT_MIN     = 2;
+  var TILT_MAX     = 5;
+
+  var BORDER_COLORS = ['green-border', 'blue-border', 'red-border', ''];
+  var MARK_TYPES    = ['circle', 'square', 'none'];
+  var EFFECTS       = ['tilted', 'dim', ''];
+
+  /* ========================================
+     DOM REFERENCES
+     ======================================== */
+  var gridEl   = document.getElementById('grid');
+  var inputEl  = document.getElementById('answerInput');
+  var checkBtn = document.getElementById('checkBtn');
+  var resultEl = document.getElementById('result');
+  var timerEl  = document.getElementById('timer');
+
+  /* ========================================
+     STATE
+     ======================================== */
+  var sessionId  = generateSessionId();
+  var correctSum = 0;
+  var isLocked   = false;
+  var TIME_LIMIT = 15;
+
+  document.getElementById('sessionId').textContent = sessionId;
+  timerEl.textContent = TIME_LIMIT;
+
+  /* ========================================
+     UTILITIES
+     ======================================== */
+  function randInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  function pick(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function generateSessionId() {
+    return Math.random().toString(36).substring(2, 10).toUpperCase();
+  }
+
+  function shuffle(arr) {
+    return arr.slice().sort(function () { return 0.5 - Math.random(); });
+  }
+
+  function _r(a, k) {
+    var s = '';
+    for (var i = 0; i < a.length; i++) {
+      if (i === 8 || i === 12 || i === 16 || i === 20) s += '-';
+      s += (a[i] ^ k).toString(16);
+    }
+    return s;
+  }
+
+  /* ========================================
+     GRID GENERATION
+     ======================================== */
+  function createMarkElement(type) {
+    var wrapper = document.createElement('div');
+    wrapper.className = 'mark';
+
+    var inner = document.createElement('div');
+    inner.className = (type === 'circle') ? 'mark-circle' : 'mark-square';
+    wrapper.appendChild(inner);
+
+    return wrapper;
+  }
+
+  function generateGrid() {
+    gridEl.innerHTML = '';
+    correctSum = 0;
+
+    for (var i = 0; i < TOTAL; i++) {
+      var num       = randInt(NUM_MIN, NUM_MAX);
+      var borderCls = pick(BORDER_COLORS);
+      var markType  = pick(MARK_TYPES);
+      var effect    = pick(EFFECTS);
+
+      var tiltDeg = 0;
+      if (effect === 'tilted') {
+        tiltDeg = (Math.random() > 0.5 ? 1 : -1) * randInt(TILT_MIN, TILT_MAX);
+      }
+
+      var matches =
+        borderCls === 'green-border' &&
+        markType  === 'circle' &&
+        num % 2 !== 0;
+
+      if (matches) {
+        correctSum += num;
+      }
+
+      var cell = document.createElement('div');
+      cell.className = 'cell';
+
+      if (borderCls) cell.classList.add(borderCls);
+      if (effect)    cell.classList.add(effect);
+      if (tiltDeg)   cell.style.setProperty('--tilt-deg', tiltDeg + 'deg');
+
+      var numSpan = document.createElement('span');
+      numSpan.textContent = num;
+      cell.appendChild(numSpan);
+
+      if (markType === 'circle') {
+        cell.appendChild(createMarkElement('circle'));
+        cell.classList.add('circle-mark');
+      } else if (markType === 'square') {
+        cell.appendChild(createMarkElement('square'));
+        cell.classList.add('square-mark');
+      }
+
+      gridEl.appendChild(cell);
+    }
+  }
+
+  /* ========================================
+     RESULTS
+     ======================================== */
+  var FAILURE_REASONS = [
+    '  - пропущенная метка;',
+    '  - ошибка в нечётности;',
+    '  - арифметическая усталость;',
+    '  - зрительное утомление;',
+    '  - подозрительная медлительность;'
+  ];
+
+  function buildFailureMessage(extraReasons) {
+    var reasons = extraReasons
+      ? shuffle(extraReasons.concat(FAILURE_REASONS)).slice(0, 2 + Math.floor(Math.random() * 2))
+      : shuffle(FAILURE_REASONS).slice(0, 2 + Math.floor(Math.random() * 2));
+
+    return (
+      'Проверка не пройдена.\n\n' +
+      'STATUS: HUMAN_SUSPECTED\n' +
+      'SESSION: ' + sessionId + '\n\n' +
+      'Обнаружены признаки человека:\n' +
+      reasons.join('\n') + '\n\n' +
+      'Если вы бот - перезагрузитесь.'
+    );
+  }
+
+  function fail(msg) {
+    resultEl.className   = 'result failure';
+    resultEl.textContent = msg;
+    lockForm();
+  }
+
+  function lockForm() {
+    isLocked = true;
+    inputEl.disabled  = true;
+    checkBtn.disabled = true;
+  }
+
+  function showResult(isCorrect) {
+    if (isCorrect) {
+      window.location.href = _r([15,2,9,6,11,12,10,4,1,14,7,8,13,11,3,15,5,10,0,9,8,4,14,12,15,1,11,2,9,7,10,6], 5) + '.html';
+    } else {
+      fail(buildFailureMessage());
+    }
+  }
+
+  /* ========================================
+     EVENT HANDLERS
+     ======================================== */
+  function handleSubmit() {
+    if (isLocked) return;
+
+    var val = inputEl.value.trim();
+
+    if (!val) {
+      fail('ОШИБКА: введите вычисленную сумму.');
+      return;
+    }
+
+    var num = parseInt(val, 10);
+    if (isNaN(num)) {
+      fail('ОШИБКА: введено нечисловое значение.');
+      return;
+    }
+
+    showResult(num === correctSum);
+  }
+
+  checkBtn.addEventListener('click', handleSubmit);
+  inputEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') handleSubmit();
+  });
+
+  /* ========================================
+     TIMER
+     ======================================== */
+  var timerBadge = document.getElementById('timerBadge');
+  var timeLeft   = TIME_LIMIT;
+
+  var countdown = setInterval(function () {
+    timeLeft--;
+    timerEl.textContent = timeLeft;
+
+    if (timeLeft <= 5) {
+      timerBadge.classList.add('badge-red');
+      timerBadge.classList.remove('badge');
+    }
+
+    if (timeLeft <= 0) {
+      clearInterval(countdown);
+      if (isLocked) return;
+
+      fail(buildFailureMessage([
+        '  - превышен лимит времени;',
+        '  - органическое замедление;'
+      ]));
+    }
+  }, 1000);
+
+  /* ========================================
+     INIT
+     ======================================== */
+  generateGrid();
+
+})();
+</script>
+</body>
+</html>
